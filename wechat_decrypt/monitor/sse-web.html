@@ -938,7 +938,7 @@
           try {
             const data = JSON.parse(event.data);
             console.log('图片更新:', data);
-            
+
             allMessages.forEach((msg, index) => {
               if (msg.username === data.username && msg.timestamp === data.timestamp) {
                 if (data.image_url) {
@@ -954,11 +954,25 @@
             messages.forEach(wrapper => {
               const timestamp = parseFloat(wrapper.dataset.timestamp);
               if (timestamp === data.timestamp) {
-                const img = wrapper.querySelector('.message-image');
+                let img = wrapper.querySelector('.message-image');
                 const content = wrapper.querySelector('.message-content');
-                if (img && data.image_url) {
-                  img.src = data.image_url;
+
+                if (data.image_url) {
+                  if (!img) {
+                    img = document.createElement('img');
+                    img.className = 'message-image';
+                    img.onclick = function() { showImageModal(data.image_url); };
+                    img.alt = '图片';
+                    img.src = data.image_url;
+                    if (content) {
+                      content.innerHTML = '';
+                      content.appendChild(img);
+                    }
+                  } else {
+                    img.src = data.image_url;
+                  }
                 }
+
                 if (content && data.v2_unsupported) {
                   content.textContent = '[图片-新加密格式暂不支持预览]';
                 }

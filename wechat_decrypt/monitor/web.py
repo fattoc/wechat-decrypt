@@ -39,8 +39,8 @@ DECRYPTED_SESSION = os.path.join(_cfg["decrypted_dir"], "session", "session.db")
 DECODED_IMAGE_DIR = _cfg.get("decoded_image_dir", os.path.join(os.path.dirname(os.path.abspath(__file__)), "decoded_images"))
 MONITOR_CACHE_DIR = os.path.join(_cfg["decrypted_dir"], "_monitor_cache")
 WECHAT_BASE_DIR = _cfg.get("wechat_base_dir", "")
-IMAGE_AES_KEY = _cfg.get("image_aes_key")  # V2 格式 AES key (从微信内存提取)
-IMAGE_XOR_KEY = _cfg.get("image_xor_key", 0x88)  # XOR key
+IMAGE_AES_KEY = None  # 将在 main() 中重新加载
+IMAGE_XOR_KEY = 0x88  # 默认值，将在 main() 中更新
 
 POLL_MS = 30  # 高频轮询WAL/DB的mtime，30ms一次
 PORT = 5678
@@ -2014,6 +2014,12 @@ def _start_monitor_if_ready():
 
 
 def main():
+    global IMAGE_AES_KEY, IMAGE_XOR_KEY
+
+    cfg = load_config()
+    IMAGE_AES_KEY = cfg.get("image_aes_key")
+    IMAGE_XOR_KEY = cfg.get("image_xor_key", 0x88)
+
     print("=" * 60, flush=True)
     print("  WeChat Decrypt — 实时消息监听", flush=True)
     print("=" * 60, flush=True)

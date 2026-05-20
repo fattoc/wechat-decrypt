@@ -167,6 +167,106 @@ def ensure_keys(keys_file, db_dir):
         sys.exit(1)
 
 
+def ensure_image_keys(cfg):
+    """确保图片 AES key 存在，否则尝试从微信进程提取"""
+    from wechat_decrypt.config import _config_file_path
+    from wechat_decrypt.decrypt.image import is_v2_format
+    import glob
+
+    config_file = _config_file_path()
+    config = {}
+    if os.path.exists(config_file):
+        with open(config_file, encoding="utf-8") as f:
+            config = json.load(f)
+
+    aes_key = config.get("image_aes_key")
+    xor_key = config.get("image_xor_key")
+
+    if aes_key:
+        print(f"[+] 已有图片 AES key")
+        return
+
+    print("[*] 图片 AES key 不存在，尝试自动提取...")
+    print("    (如果提取失败，V2 加密的图片将无法解密)")
+    print()
+
+    wechat_base_dir = cfg.get("wechat_base_dir", "")
+    if not wechat_base_dir:
+        print("[!] 无法确定微信数据目录，跳过图片 key 提取")
+        return
+
+    attach_dir = os.path.join(wechat_base_dir, "msg", "attach")
+    if not os.path.isdir(attach_dir):
+        print(f"[!] attach 目录不存在: {attach_dir}")
+        return
+
+    pattern = os.path.join(attach_dir, "*", "*", "Img", "*.dat")
+    dat_files = glob.glob(pattern)
+
+    has_v2 = False
+    for f in dat_files[:50]:
+        try:
+            if is_v2_format(f):
+                has_v2 = True
+                break
+        except Exception:
+            continue
+
+    if not has_v2:
+        print("[*] 未检测到 V2 格式 .dat 文件，跳过 key 提取")
+        print("    (如果后续遇到 V2 图片，需要运行: python -m wechat_decrypt.keys.image_key)")
+        return
+
+    if not check_wechat_running():
+        print("[!] 微信未运行，无法提取图片 key")
+        print("    请先在微信中查看几张图片，然后运行: python -m wechat_decrypt.keys.image_key")
+        return
+
+    print("[*] 微信正在运行，尝试提取图片 key...")
+    print("    提示: 如果提取失败，请在微信中打开几张图片后重新运行")
+    print()
+
+    from wechat_decrypt.keys import image_key
+    try:
+        ciphertext = None
+        for pids_result in [image_key.get_wechat_pids()]:
+            if not pids_result:
+                continue
+            ciphertext, ct_file = image_key.find_v2_ciphertext(attach_dir)
+            if not ciphertext:
+                continue
+
+            for pid in pids_result:
+                print(f"[*] 扫描微信进程 PID {pid}...", flush=True)
+                found_key = image_key.scan_memory_for_aes_key(pid, ciphertext)
+                if found_key:
+                    print(f"[+] 找到图片 AES key: {found_key}")
+
+                    xor_key = image_key.find_xor_key(attach_dir)
+                    if xor_key is not None:
+                        print(f"[+] 找到图片 XOR key: 0x{xor_key:02x}")
+
+                    config['image_aes_key'] = found_key
+                    if xor_key is not None:
+                        config['image_xor_key'] = xor_key
+
+                    with open(config_file, 'w', encoding="utf-8") as f:
+                        json.dump(config, f, indent=4, ensure_ascii=False)
+                    print(f"[+] 已保存到: {config_file}")
+                    return
+            break
+
+        if not ciphertext:
+            print("[!] 未找到 V2 .dat 文件用于提取 key")
+            print("    请在微信中查看几张图片后重试")
+        else:
+            print("[!] 无法从微信进程提取图片 key")
+            print("    可能原因: 微信版本更新导致 key 位置变化")
+            print("    请手动运行: python -m wechat_decrypt.keys.image_key")
+    except Exception as e:
+        print(f"[!] 提取图片 key 时出错: {e}")
+
+
 def show_status():
     """显示当前数据状态"""
     cfg = {}
@@ -335,6 +435,12 @@ def main():
             from wechat_decrypt.decrypt.database import main as decrypt_all
             decrypt_all([])
             print()
+
+        print("[*] 检查图片解密密钥...")
+        print()
+        ensure_image_keys(cfg)
+        print()
+
         print("[*] 启动 Web UI...")
         print()
         from wechat_decrypt.monitor.web import main as start_web
