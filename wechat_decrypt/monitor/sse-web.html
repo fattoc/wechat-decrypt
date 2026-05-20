@@ -600,6 +600,110 @@
     let chatConversations = new Map();
     let allMessages = [];
     let msgCount = 0;
+    let currentSelectedChat = null;
+
+    async function loadConversations() {
+      try {
+        const response = await fetch('/api/conversations');
+        if (!response.ok) return;
+
+        const conversations = await response.json();
+
+        conversations.forEach(conv => {
+          if (!chatConversations.has(conv.username)) {
+            chatConversations.set(conv.username, {
+              chat: conv.chat,
+              is_group: conv.is_group,
+              unread: conv.unread || 0,
+              lastMessage: conv.last_message || '',
+              timestamp: conv.timestamp || 0,
+            });
+          }
+        });
+
+        renderConversationList();
+
+        if (emptyList && chatConversations.size > 0) {
+          emptyList.style.display = 'none';
+        }
+
+      } catch (error) {
+        console.error('加载会话列表失败:', error);
+      }
+    }
+
+    function renderConversationList() {
+      conversationList.innerHTML = '';
+
+      const sortedConvs = Array.from(chatConversations.entries())
+        .sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
+
+      sortedConvs.forEach(([username, conv]) => {
+        const item = document.createElement('div');
+        item.classList.add('conversation-item');
+        item.dataset.chatId = username;
+        item.innerHTML = `
+          <div class="avatar ${conv.is_group ? 'group' : ''}">${getInitials(conv.chat)}</div>
+          <div class="conversation-info">
+            <div class="conversation-name">
+              ${conv.is_group ? '<span class="group-icon">👥</span>' : ''}
+              ${escapeHtml(conv.chat || username)}
+            </div>
+            <div class="last-message">${escapeHtml(conv.lastMessage || conv.chat || '').substring(0, 50)}</div>
+          </div>
+          <div class="timestamp">${formatTime(conv.timestamp)}</div>
+        `;
+
+        item.addEventListener('click', () => {
+          selectConversation(username);
+        });
+
+        if (conv.unread > 0) {
+          const avatarEl = item.querySelector('.avatar');
+          const badge = document.createElement('span');
+          badge.classList.add('unread-badge');
+          badge.textContent = conv.unread > 99 ? '99+' : conv.unread;
+          avatarEl.appendChild(badge);
+        }
+
+        if (username === currentSelectedChat) {
+          item.classList.add('active');
+        }
+
+        conversationList.appendChild(item);
+      });
+
+      if (emptyList && chatConversations.size === 0) {
+        emptyList.style.display = 'flex';
+      }
+    }
+
+    function updateConversationFromSSE(msg) {
+      const username = msg.username;
+      if (!username) return;
+
+      if (!chatConversations.has(username)) {
+        chatConversations.set(username, {
+          chat: msg.chat,
+          is_group: msg.is_group,
+          unread: 0,
+          lastMessage: '',
+          timestamp: 0,
+        });
+      }
+
+      const conv = chatConversations.get(username);
+      conv.chat = msg.chat || conv.chat;
+      conv.is_group = msg.is_group;
+      conv.lastMessage = msg.content || msg.type || '新消息';
+      conv.timestamp = msg.timestamp;
+
+      if (currentSelectedChat !== username) {
+        conv.unread = (conv.unread || 0) + 1;
+      }
+
+      renderConversationList();
+    }
 
     function getCurrentTimeString() {
       const now = new Date();
@@ -620,7 +724,7 @@
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
       const isYesterday = date.toDateString() === yesterday.toDateString();
-      
+
       if (isToday) {
         return date.toTimeString().substring(0, 5);
       } else if (isYesterday) {
@@ -649,25 +753,95 @@
       return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
+    const WECHAT_EMOJI_MAP = {
+      '[微笑]': '😊', '[撇嘴]': '😒', '[色]': '😍', '[发呆]': '😳', '[得意]': '😏',
+      '[流泪]': '😭', '[害羞]': '😊', '[闭嘴]': '🤐', '[睡]': '😴', '[大哭]': '😭',
+      '[尴尬]': '😰', '[惊恐]': '😱', '[冷汗]': '😰', '[偷笑]': '🙈', '[可爱]': '🥰',
+      '[白眼]': '🙄', '[傲慢]': '😏', '[饥饿]': '🤤', '[困]': '😪', '[惊恐]': '😨',
+      '[流汗]': '😅', '[憨笑]': '🤭', '[大兵]': '💂', '[奋斗]': '💪', '[咒骂]': '😤',
+      '[疑问]': '🤔', '[嘘]': '🤫', '[晕]': '😵', '[疯了]': '🤪', '[凋谢]': '🥀',
+      '[嘴唇]': '💋', '[飞吻]': '😘', '[怄火]': '😤', '[发抖]': '😨', '[磕头]': '🙏',
+      '[回头]': '🙆', '[激动]': '🤯', '[舞]': '💃', '[Adapter]': '🥁', '[演示]': '🎭',
+      '[示爱]': '❤️', '[ksa]': '🎁', '[生日蛋糕]': '🎂', '[蜡烛]': '🕯',
+      '[爆筋]': '💪', '[瘦弱]': '🙅', '[强壮]': '💪', '[再见]': '👋',
+      '[左哼哼]': '😠', '[右哼哼]': '😡', '[哈欠]': '😪', '[鄙视]': '😤', '[委屈]': '😢',
+      '[坏笑]': '😏', '[左哼哼]': '😠', '[饥饿]': '🤤', '[惊恐]': '😨', '[大兵]': '💂',
+      '[得意]': '😏', '[阸]': '🤮', '[大哭]': '😭', '[害怕]': '😨',
+      '[骷髅]': '💀', '[网民]': '👻', '[光棍]': '🌚', '[招财猫]': '🐱', '[蒙娜丽莎]': '🖼',
+      '[鸡]': '🐔', '[母蚊子]': '🦟', '[关羽]': '🦸', '[张飞]': '💪', '[诸葛亮]': '🧠',
+      '[阿童木]': '🤖', '[咖啡]': '☕', '[足球]': '⚽', '[篮球]': '🏀', '[兵乓球]': '🏓',
+      '[网球]': '🎾', '[高尔夫]': '⛳', '[棒球]': '⚾', '[LV]': '👜', '[mv]': '📱',
+      '[左太极]': '☯', '[NO]': '🚫', '[皇冠]': '👑', '[KTV]': '🎤', '[绿灯]': '🚦',
+      '[红绿灯]': '🚥', '[cd]': '💿', '[bat]': '🏏', '[shed]': '🏠', '[mg]': '💊',
+      '[m]': '➕', '[m]': '➖', '[m]': '✖', '[m]': '➗', '[m]': '🔢',
+      '[大于]': '▶', '[小于]': '◀', '[远远]': '⏩', '[LY]': '🎵', '[PK]': '⚔',
+      '[福]': '🧧', '[抱拳]': '🤝', '[恭喜]': '🎊', '[笆]': '🎈', '[樱花]': '🌸',
+      '[音乐]': '🎵', '[月]': '🌙', '[太阳]': '☀️', '[水滴]': '💧', '[乱跳]': '💃',
+      '[飘浮]': '🎈', '[爆筋]': '💪', '[星星]': '⭐', '[犸]': '🐴', '[熊猫]': '🐼',
+      '[龙]': '🐉', '[猪]': '🐷', '[兔子]': '🐰', '[外星人]': '👽', '[Instance]': '🤖',
+      '[圣诞老人]': '🎅', '[雪人]': '⛄', '[香蕉]': '🍌', '[西瓜]': '🍉', '[番茄]': '🍅',
+      '[咖啡]': '☕', '[面包]': '🍞', '[米饭]': '🍚', '[面条]': '🍜', '[日本]': '🏯',
+      '[救助]': '🏥', '[lm]': '💡', '[内裤]': '👙', '[衣物]': '👗', '[mv]': '👔',
+      '[shirt]': '👕', '[心]': '❤️', '[心碎]': '💔', '[礼物]': '🎁', '[男孩]': '👦',
+      '[女孩]': '👧', '[蛋糕]': '🎂', '[k歌]': '🎤', '[lovel]': '💕', '[嘴唇]': '💋',
+      '[男孩]': '👦', '[女孩]': '👧', '[企鹅]': '🐧', '[松鼠]': '🐿', '[豹]': '🐆',
+      '[马]': '🐎', '[蝴蝶]': '🦋', '[猫]': '🐱', '[小狗]': '🐕', '[小鸡]': '🐤',
+      '[小虫]': '🐛', '[摩拜]': '🚲', '[min]': '⏰', '[闹钟]': '⏰', '[iPhone]': '📱',
+      '[MID]': '🎹', '[红中]': '🀄', '[白板]': '📋', '[ping]': '🏓', '[大巴]': '🚌',
+      '[飞机]': '✈', '[火箭]': '🚀', '[游轮]': '🚢', '[自行车]': '🚲', '[公交车]': '🚌',
+      '[出租车]': '🚕', '[坦克]': '🏋', '[红心]': '❤️', '[女孩]': '👧', '[丘比特]': '💘',
+      '[yth]': '🌈', '[流星]': '🌠', '[月亮]': '🌙', '[太阳]': '☀️', '[购物]': '🛒',
+      '[玩具]': '🎁', '[砸蛋]': '🥚', '[mg]': '💊', '[恭喜]': '🎊', '[灵堂]': '🏚',
+      '[感冒]': '🤒', '[打针]': '💉', '[发廊]': '💇', '[放屁]': '💨', '[左太极]': '☯',
+      '[m]': '➕', '[m]': '➖', '[OK]': '👌', '[good]': '👍', '[YES]': '✅',
+      '[NO]': '❌', '[拳头]': '✊', '[掌心]': '✋', '[手指]': '☝', '[赞]': '👍',
+      '[good]': '👍', '[弱]': '👎', '[拜托]': '🙏', '[揶]': '✍', '[握手]': '🤝',
+      '[肌肉]': '💪', '[勾引]': '😏', '[胜利]': '✌', '[抱拳]': '🤝', '[招财猫]': '🐱',
+      '[左掌]': '✋', '[单手]': '🤚', '[挥手]': '👋', '[抠鼻]': '🤌', '[囧]': '😳',
+      '[愤怒]': '😠', '[疑问]': '🤔', '[卖萌]': '🥰', '[呆滞]': '😶', '[皱眉]': '😟',
+      '[good]': '👍', '[困]': '😪', '[难过]': '😢', '[委屈]': '😢', '[尴尬]': '😰',
+      '[大兵]': '💂', '[石化]': '😶', '[吓]': '😱', '[晕]': '😵', '[LOL]': '😂',
+      '[Not4]': '😭', '[dog]': '🐕', '[草]': '🌿', '[多云]': '⛅', '[下雨]': '🌧',
+      '[雪人]': '⛄', '[雪]': '❄️', '[太阳]': '☀️', '[沙尘暴]': '🌪', '[雾]': '🌫',
+      '[龙卷风]': '🌪', '[台风]': '🌀', '[水]': '💧', '[星星之火]': '🔥', '[火焰]': '🔥',
+      '[Disabled]': '🚫', '[id]': '🔑', '[锁]': '🔒', '[off]': '📴', '[cyclone]': '🌀',
+      '[metro]': '🚇', '[Return]': '↩', '[捂脸]': '🤦', '[在看]': '👀', '[丘比特]': '💘',
+      '[绿丝带]': '💚', '[红丝带]': '❤️', '[金聚]': '🎉', '[聚会]': '🎊', '[Group]': '👥',
+    };
+
+    function convertWechatEmoji(text) {
+      if (!text || typeof text !== 'string') return text;
+      let result = text;
+      for (const [pattern, emoji] of Object.entries(WECHAT_EMOJI_MAP)) {
+        if (result.includes(pattern)) {
+          const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          result = result.replace(new RegExp(escapedPattern, 'g'), '<span class="emoji-icon">' + emoji + '</span>');
+        }
+      }
+      return result;
+    }
+
     function createMessageElement(msg, isOwn = false) {
       const wrapper = document.createElement('div');
       wrapper.classList.add('message-wrapper');
       wrapper.classList.add(isOwn ? 'sent' : 'received');
       wrapper.dataset.timestamp = msg.timestamp || 0;
-      
+
       const sender = msg.is_group && msg.sender ? `<div class="message-sender">${escapeHtml(msg.sender)}</div>` : '';
       wrapper.innerHTML = sender;
 
       const messageDiv = document.createElement('div');
       messageDiv.classList.add('message');
-      
+
       let content = msg.content || '';
-      
+
       if (msg.image_url) {
         content = `<img src="${msg.image_url}" class="message-image" onclick="showImageModal('${msg.image_url}')" alt="图片" />`;
       } else if (msg.rich) {
         if (msg.rich.type === 'emoji' && msg.rich.emoji_url) {
           content = `<img src="${msg.rich.emoji_url}" class="message-image" alt="表情" />`;
+        } else if (msg.rich.type === 'emoji' && !msg.rich.emoji_url) {
+          content = convertWechatEmoji(escapeHtml(content)) || `<span class="emoji-icon">😀</span> <span style="color:#888;">[表情]</span>`;
         } else if (msg.rich.type === 'link' || msg.rich.type === 'miniapp') {
           content = `<div style="background:#f5f5f5;padding:10px;border-radius:6px;">
             <div style="font-weight:bold;color:#333;margin-bottom:4px;">${escapeHtml(msg.rich.title)}</div>
@@ -703,7 +877,7 @@
       } else if (msg.type === '视频') {
         content = `<div style="background:#f5f5f5;padding:10px;border-radius:6px;text-align:center;">🎬 ${escapeHtml(content)}</div>`;
       } else {
-        content = escapeHtml(content);
+        content = convertWechatEmoji(escapeHtml(content));
       }
 
       messageDiv.innerHTML = `<div class="message-content">${content}</div>`;
@@ -730,114 +904,54 @@
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
-    function updateConversationList(msg) {
-      const username = msg.username;
-      if (!username) return;
-
-      if (!chatConversations.has(username)) {
-        const item = document.createElement('div');
-        item.classList.add('conversation-item');
-        item.dataset.chatId = username;
-        item.innerHTML = `
-          <div class="avatar ${msg.is_group ? 'group' : ''}">${getInitials(msg.chat)}</div>
-          <div class="conversation-info">
-            <div class="conversation-name">
-              ${msg.is_group ? '<span class="group-icon">👥</span>' : ''}
-              ${escapeHtml(msg.chat || username)}
-            </div>
-            <div class="last-message">${escapeHtml(msg.content || msg.type || '新消息').substring(0, 50)}</div>
-          </div>
-          <div class="timestamp">${formatTime(msg.timestamp)}</div>
-        `;
-        
-        item.addEventListener('click', () => {
-          selectConversation(username);
-        });
-
-        conversationList.appendChild(item);
-        
-        if (emptyList) {
-          emptyList.style.display = 'none';
-        }
-      }
-
-      const conv = chatConversations.get(username);
-      if (conv) {
-        conv.lastMessage = msg.content || msg.type || '新消息';
-        conv.timestamp = msg.timestamp;
-        conv.unread = (conv.unread || 0) + 1;
-        
-        const item = conversationList.querySelector(`[data-chat-id="${username}"]`);
-        if (item) {
-          const lastMsgEl = item.querySelector('.last-message');
-          const timeEl = item.querySelector('.timestamp');
-          const avatarEl = item.querySelector('.avatar');
-          
-          if (lastMsgEl) lastMsgEl.textContent = (conv.lastMessage || '').substring(0, 50);
-          if (timeEl) timeEl.textContent = formatTime(conv.timestamp);
-          
-          let badge = item.querySelector('.unread-badge');
-          if (conv.unread > 0) {
-            if (!badge) {
-              badge = document.createElement('span');
-              badge.classList.add('unread-badge');
-              avatarEl.appendChild(badge);
-            }
-            badge.textContent = conv.unread > 99 ? '99+' : conv.unread;
-          } else if (badge) {
-            badge.remove();
-          }
-        }
-      }
-
-      sortConversationList();
-    }
-
-    function sortConversationList() {
-      const items = Array.from(conversationList.querySelectorAll('.conversation-item'));
-      items.sort((a, b) => {
-        const aUsername = a.dataset.chatId;
-        const bUsername = b.dataset.chatId;
-        const aConv = chatConversations.get(aUsername);
-        const bConv = chatConversations.get(bUsername);
-        return (bConv?.timestamp || 0) - (aConv?.timestamp || 0);
-      });
-      items.forEach(item => conversationList.appendChild(item));
-    }
-
     function selectConversation(chatId) {
+      currentSelectedChat = chatId;
+
       document.querySelectorAll('.conversation-item').forEach(item => {
         item.classList.remove('active');
       });
-      
-      const item = conversationList.querySelector(`[data-chat-id="${chatId}"]`);
-      if (item) {
-        item.classList.add('active');
-      }
 
-      const conv = chatConversations.get(chatId);
-      if (conv) {
-        conv.unread = 0;
-        const avatarEl = item?.querySelector('.unread-badge');
-        if (avatarEl) avatarEl.remove();
-      }
+      if (chatId !== null) {
+        const item = conversationList.querySelector(`[data-chat-id="${chatId}"]`);
+        if (item) {
+          item.classList.add('active');
+          const avatarEl = item.querySelector('.avatar');
+          const badge = avatarEl?.querySelector('.unread-badge');
+          if (badge) badge.remove();
+        }
 
-      currentChatNameHeader.textContent = conv?.chat || chatId || '全部消息';
-      currentChatAvatarHeader.textContent = getInitials(currentChatNameHeader.textContent);
-      currentChatAvatarHeader.className = conv?.is_group ? 'group' : '';
+        const conv = chatConversations.get(chatId);
+        if (conv) {
+          conv.unread = 0;
+        }
+
+        currentChatNameHeader.textContent = conv?.chat || chatId || '全部消息';
+        currentChatAvatarHeader.textContent = getInitials(currentChatNameHeader.textContent);
+        currentChatAvatarHeader.className = conv?.is_group ? 'group' : '';
+      } else {
+        currentChatNameHeader.textContent = '全部消息';
+        currentChatAvatarHeader.textContent = '全部';
+        currentChatAvatarHeader.className = '';
+      }
 
       messagesContainer.innerHTML = '';
       if (emptyMessages) {
         emptyMessages.style.display = 'flex';
       }
 
-      const filteredMsgs = allMessages.filter(m => m.username === chatId);
+      let filteredMsgs;
+      if (chatId === null) {
+        filteredMsgs = allMessages;
+      } else {
+        filteredMsgs = allMessages.filter(m => m.username === chatId);
+      }
+
       if (filteredMsgs.length === 0) {
         const emptyState = document.createElement('div');
         emptyState.className = 'empty-state';
         emptyState.innerHTML = `
           <div class="empty-state-icon">💬</div>
-          <div>与 ${escapeHtml(conv?.chat || chatId)} 的聊天记录</div>
+          <div>${chatId === null ? '暂无消息' : '与 ' + escapeHtml(chatConversations.get(chatId)?.chat || chatId) + ' 的聊天记录'}</div>
         `;
         messagesContainer.appendChild(emptyState);
       } else {
@@ -847,6 +961,8 @@
         });
       }
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+      renderConversationList();
     }
 
     function showImageModal(url) {
@@ -897,11 +1013,11 @@
           try {
             const data = JSON.parse(event.data);
             console.log('收到消息:', data);
-            
+
             const now = Date.now() / 1000;
             const latency = data.timestamp ? (now - data.timestamp).toFixed(1) : '--';
             latencySpan.textContent = latency;
-            
+
             if (data.decrypt_ms !== undefined) {
               decryptTimeSpan.textContent = data.decrypt_ms;
             }
@@ -909,23 +1025,14 @@
               pagesSpan.textContent = data.pages;
             }
 
-            if (!chatConversations.has(data.username)) {
-              chatConversations.set(data.username, {
-                chat: data.chat,
-                is_group: data.is_group,
-                unread: 0
-              });
-            }
-
-            updateConversationList(data);
+            updateConversationFromSSE(data);
             allMessages.push(data);
             msgCount++;
             msgCountSpan.textContent = msgCount;
 
-            const activeChat = document.querySelector('.conversation-item.active');
-            const activeChatId = activeChat?.dataset.chatId;
-            
-            if (!activeChatId || activeChatId === data.username) {
+            if (currentSelectedChat === null) {
+              addMessageToDOM(data, false);
+            } else if (currentSelectedChat === data.username) {
               addMessageToDOM(data, false);
             }
 
@@ -988,10 +1095,50 @@
           try {
             const data = JSON.parse(event.data);
             console.log('富媒体更新:', data);
-            
+
             allMessages.forEach(msg => {
               if (msg.username === data.username && msg.timestamp === data.timestamp) {
                 msg.rich = data.rich;
+              }
+            });
+
+            const messages = messagesContainer.querySelectorAll('.message-wrapper');
+            messages.forEach(wrapper => {
+              const timestamp = parseFloat(wrapper.dataset.timestamp);
+              if (timestamp === data.timestamp) {
+                const messageDiv = wrapper.querySelector('.message');
+                if (!messageDiv) return;
+
+                const contentDiv = messageDiv.querySelector('.message-content');
+                if (!contentDiv) return;
+
+                if (data.rich && data.rich.type === 'emoji') {
+                  if (data.rich.emoji_url) {
+                    contentDiv.innerHTML = `<img src="${data.rich.emoji_url}" class="message-image" alt="表情" />`;
+                  } else {
+                    contentDiv.innerHTML = `<span class="emoji-icon">😀</span> <span style="color:#888;">[表情]</span>`;
+                  }
+                } else if (data.rich && data.rich.type === 'link') {
+                  contentDiv.innerHTML = `<div style="background:#f5f5f5;padding:10px;border-radius:6px;">
+                    <div style="font-weight:bold;color:#333;margin-bottom:4px;">${escapeHtml(data.rich.title || '')}</div>
+                    ${data.rich.des ? `<div style="font-size:13px;color:#666;margin-bottom:6px;">${escapeHtml(data.rich.des).substring(0,100)}...</div>` : ''}
+                    ${data.rich.url ? `<a href="${escapeHtml(data.rich.url)}" target="_blank" class="message-link">查看详情 →</a>` : ''}
+                  </div>`;
+                } else if (data.rich && data.rich.type === 'file') {
+                  contentDiv.innerHTML = `<div class="message-file">
+                    <span class="file-icon">📎</span>
+                    <div class="file-info">
+                      <div class="file-name">${escapeHtml(data.rich.title || '')}</div>
+                      <div class="file-size">${formatFileSize(data.rich.file_size || 0)}</div>
+                    </div>
+                  </div>`;
+                } else if (data.rich && data.rich.type === 'transfer') {
+                  contentDiv.innerHTML = `<div class="transfer-message">
+                    <div class="transfer-title">${data.rich.title || '微信转账'}</div>
+                    <div class="transfer-amount">${data.rich.fee_desc || ''}</div>
+                    ${data.rich.pay_memo ? `<div class="transfer-memo">备注: ${escapeHtml(data.rich.pay_memo)}</div>` : ''}
+                  </div>`;
+                }
               }
             });
 
@@ -1042,6 +1189,7 @@
     });
 
     window.onload = function() {
+      loadConversations();
       connectToStream();
     };
 

@@ -1252,24 +1252,22 @@ class SessionMonitor:
                 })
                 print(f"  [hidden] 补充文字: {mc[:30]} t={ts}", flush=True)
             elif base == 47:
-                # 隐藏的表情消息
                 rich = self.resolve_rich_content(username, ts, 47)
                 msg_data.update({
                     'type': '表情', 'type_icon': '\U0001f600',
                     'content': '[表情]',
                 })
                 if rich:
-                    msg_data['rich_content'] = rich
+                    msg_data['rich'] = rich
                 print(f"  [hidden] 补充表情 t={ts}", flush=True)
             elif base == 49:
-                # 隐藏的富媒体消息
                 rich = self.resolve_rich_content(username, ts, 49)
                 msg_data.update({
                     'type': format_msg_type(base), 'type_icon': msg_type_icon(base),
                     'content': mc[:100] if mc else '',
                 })
                 if rich:
-                    msg_data['rich_content'] = rich
+                    msg_data['rich'] = rich
                 print(f"  [hidden] 补充富媒体 t={ts}", flush=True)
             else:
                 # 其他类型
@@ -1347,7 +1345,6 @@ class SessionMonitor:
         import xml.etree.ElementTree as ET
 
         if msg_type == 47:
-            # --- 表情 ---
             result = self._query_msg_content(username, timestamp, 47)
             if not result:
                 print(f"  [emoji] 查询失败 user={username[:10]} ts={timestamp}", flush=True)
@@ -1362,13 +1359,11 @@ class SessionMonitor:
                     return None
                 md5 = emoji.get('md5', '')
                 etype = emoji.get('type', '')
-                # 优先用 XML 中的 URL
                 url = emoji.get('thumburl') or emoji.get('externurl') or emoji.get('cdnurl') or ''
                 url = url.replace('&amp;', '&')
                 if url and url.startswith('http'):
-                    print(f"  [emoji] XML有URL md5={md5[:12]} type={etype}", flush=True)
+                    print(f"  [emoji] XML有URL md5={md5[:12] if md5 else 'N/A'} type={etype}", flush=True)
                     return {'type': 'emoji', 'emoji_url': url}
-                # XML 无 URL → 从 emoticon.db 下载
                 if md5:
                     with _emoji_lookup_lock:
                         in_lookup = md5 in _emoji_lookup
@@ -1377,9 +1372,11 @@ class SessionMonitor:
                     img_name = _download_emoji(md5)
                     if img_name:
                         return {'type': 'emoji', 'emoji_url': f'/img/{img_name}'}
-                    print(f"  [emoji] 下载失败 md5={md5[:12]}", flush=True)
+                    print(f"  [emoji] 下载失败 md5={md5[:12]}, 返回fallback图标", flush=True)
+                    return {'type': 'emoji', 'emoji_url': None}
                 else:
-                    print(f"  [emoji] 无md5 type={etype}", flush=True)
+                    print(f"  [emoji] 无md5 type={etype}, 返回fallback图标", flush=True)
+                    return {'type': 'emoji', 'emoji_url': None}
             except ET.ParseError:
                 pass
             return None
@@ -1667,12 +1664,6 @@ class SessionMonitor:
                 }
 
                 new_msgs.append(msg_data)
-                # _shown_keys 改用 (username, local_id) 精确去重（issue #79）。
-                # SessionTable 不带 local_id，去 message_N.db 查同时拿 local_id 和完整正文：
-                # - local_id 用于去重
-                # - 完整正文替换 SessionTable.summary 的 ~80 字短截断（issue #42）
-                # 查不到时（message DB 写入滞后于 SessionTable）跳过加 key，让 _check_hidden_messages
-                # 1 秒后查到时自己 emit 并加 key。这种情况下偶发轻微重复，但比丢消息好。
                 latest_local_id, full_content = self._lookup_latest_message(username, curr['timestamp'])
                 if latest_local_id is not None:
                     self._shown_keys.add((username, latest_local_id))
@@ -1807,7 +1798,62 @@ class Handler(BaseHTTPRequestHandler):
             pass  # 浏览器关闭连接，正常
 
     def do_GET(self):
-        if self.path.startswith('/api/history'):
+        if self.path == '/api/conversations':
+            import threading
+            _convs_lock = threading.Lock()
+            with _convs_lock:
+                conversations = []
+                try:
+                    conn = sqlite3.connect(f"file:{DECRYPTED_SESSION}?mode=ro", uri=True)
+                    rows = conn.execute("""
+                        SELECT username, unread_count, summary, last_timestamp,
+                               last_msg_type, last_msg_sender, last_sender_display_name
+                        FROM SessionTable WHERE last_timestamp > 0
+                        ORDER BY last_timestamp DESC
+                    """).fetchall()
+                    conn.close()
+
+                    for r in rows:
+                        username = r[0]
+                        unread = r[1]
+                        summary = r[2] or ''
+                        timestamp = r[3]
+                        msg_type = r[4]
+                        sender = r[5] or ''
+                        sender_name = r[6] or ''
+
+                        if isinstance(summary, bytes):
+                            try:
+                                summary = _zstd_dctx.decompress(summary).decode('utf-8', errors='replace')
+                            except Exception:
+                                summary = '(压缩内容)'
+
+                        if summary and ':\n' in summary:
+                            summary = summary.split(':\n', 1)[1]
+
+                        display = username
+                        is_group = '@chatroom' in username
+
+                        conversations.append({
+                            'username': username,
+                            'chat': display,
+                            'is_group': is_group,
+                            'unread': unread,
+                            'last_message': summary,
+                            'timestamp': timestamp,
+                            'msg_type': msg_type,
+                            'sender': sender,
+                            'sender_name': sender_name,
+                        })
+                except Exception as e:
+                    print(f"[api] 获取会话列表失败: {e}", flush=True)
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps(conversations, ensure_ascii=False).encode('utf-8'))
+
+        elif self.path.startswith('/api/history'):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
             filter_chat = params.get('chat', [''])[0].strip().lower()
