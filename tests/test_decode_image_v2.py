@@ -17,7 +17,7 @@ import unittest
 from Crypto.Cipher import AES
 from Crypto.Util import Padding
 
-from decode_image import (
+from wechat_decrypt.decrypt.image import (
     V1_MAGIC_FULL,
     V2_MAGIC_FULL,
     ImageResolver,

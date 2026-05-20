@@ -15,7 +15,7 @@ shards, are sorted by `create_time` DESC across shards, and respect the
 import unittest
 from unittest.mock import patch
 
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 class GetChatImagesMultiShardTests(unittest.TestCase):

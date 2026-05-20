@@ -1,10 +1,5 @@
 """测试分页提示语 _pagination_hint() 的边界行为。"""
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 def test_no_hint_when_count_less_than_limit():

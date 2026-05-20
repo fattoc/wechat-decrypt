@@ -11,7 +11,7 @@ fallback to `[语音]` on missing / zero / malformed length.
 """
 import unittest
 
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 def _voice_xml(length_ms):

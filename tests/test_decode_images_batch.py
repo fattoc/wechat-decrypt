@@ -19,7 +19,7 @@ from contextlib import redirect_stderr
 import io
 from unittest.mock import patch
 
-import decode_image
+from wechat_decrypt.decrypt import image as decode_image
 
 
 def _write(path, data):

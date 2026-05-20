@@ -9,7 +9,7 @@ import unittest
 from contextlib import closing, redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
-import export_all_chats
+from wechat_decrypt.export import all_chats as export_all_chats
 
 
 class ChatRowsTests(unittest.TestCase):

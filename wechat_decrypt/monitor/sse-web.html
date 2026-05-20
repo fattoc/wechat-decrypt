@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>微信消息监控</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: 'Segoe UI', 'Microsoft YaHei', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f1f0f0;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    #app-container {
+      width: 100%;
+      max-width: 1400px;
+      height: 95vh;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      overflow: hidden;
+      display: flex;
+    }
+
+    #chat-list-section {
+      width: 320px;
+      min-width: 280px;
+      height: 100%;
+      border-right: 1px solid #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      background-color: #f5f5f5;
+    }
+
+    #search-bar {
+      padding: 12px;
+      background-color: #ededed;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    #search-input {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    #search-input:focus {
+      border-color: #07c160;
+    }
+
+    #conversation-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .conversation-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      border-bottom: 1px solid #eee;
+    }
+
+    .conversation-item:hover {
+      background-color: #ebebeb;
+    }
+
+    .conversation-item.active {
+      background-color: #e0e0e0;
+    }
+
+    .avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #07c160, #00aaff);
+      margin-right: 12px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      font-weight: bold;
+      font-size: 18px;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .avatar.group {
+      background: linear-gradient(135deg, #ff9800, #ff5722);
+    }
+
+    .unread-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      background-color: #fa5151;
+      color: white;
+      font-size: 11px;
+      min-width: 18px;
+      height: 18px;
+      border-radius: 9px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 0 5px;
+      font-weight: bold;
+    }
+
+    .conversation-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .conversation-name {
+      font-weight: 600;
+      font-size: 15px;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .group-icon {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .last-message {
+      font-size: 13px;
+      color: #888;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .timestamp {
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+
+    #chat-window-section {
+      width: 70%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background-color: #f5f6fa;
+    }
+
+    #chat-header {
+      padding: 16px 20px;
+      background-color: #ededed;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #chat-header-left {
+      display: flex;
+      align-items: center;
+    }
+
+    #current-chat-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #07c160, #00aaff);
+      margin-right: 12px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      font-weight: bold;
+      font-size: 16px;
+    }
+
+    #current-chat-avatar.group {
+      background: linear-gradient(135deg, #ff9800, #ff5722);
+    }
+
+    #current-chat-name {
+      font-weight: 600;
+      font-size: 18px;
+      color: #333;
+    }
+
+    #chat-stats {
+      font-size: 12px;
+      color: #888;
+      background: white;
+      padding: 4px 10px;
+      border-radius: 12px;
+    }
+
+    #messages-container {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message-wrapper {
+      display: flex;
+      flex-direction: column;
+      max-width: 70%;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message-wrapper.received {
+      align-self: flex-start;
+    }
+
+    .message-wrapper.sent {
+      align-self: flex-end;
+    }
+
+    .message-sender {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 4px;
+      margin-left: 12px;
+    }
+
+    .message {
+      padding: 10px 14px;
+      border-radius: 8px;
+      position: relative;
+      word-wrap: break-word;
+      word-break: break-all;
+      line-height: 1.5;
+    }
+
+    .received .message {
+      background-color: #ffffff;
+      border-top-left-radius: 0;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .sent .message {
+      background-color: #9eea6a;
+      border-top-right-radius: 0;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .message-content {
+      font-size: 15px;
+      color: #333;
+    }
+
+    .message-meta {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .message-time {
+      font-size: 11px;
+      color: #999;
+    }
+
+    .message-type {
+      font-size: 11px;
+      color: #aaa;
+      background: rgba(0,0,0,0.05);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .message-image {
+      max-width: 300px;
+      max-height: 200px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    .message-image:hover {
+      transform: scale(1.02);
+    }
+
+    .message-link {
+      color: #576b95;
+      text-decoration: none;
+      word-break: break-all;
+    }
+
+    .message-link:hover {
+      text-decoration: underline;
+    }
+
+    .message-file {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.03);
+      border-radius: 6px;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .file-icon {
+      font-size: 24px;
+    }
+
+    .file-info {
+      flex: 1;
+    }
+
+    .file-name {
+      font-size: 14px;
+      color: #333;
+    }
+
+    .file-size {
+      font-size: 12px;
+      color: #888;
+    }
+
+    #input-area {
+      padding: 16px 20px;
+      background-color: #ededed;
+      border-top: 1px solid #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    #message-input {
+      width: 100%;
+      height: 80px;
+      padding: 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      resize: none;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    #message-input:focus {
+      border-color: #07c160;
+    }
+
+    #send-button {
+      align-self: flex-end;
+      padding: 10px 24px;
+      background-color: #07c160;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: background-color 0.2s;
+    }
+
+    #send-button:hover {
+      background-color: #06a050;
+    }
+
+    #connection-status {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      color: white;
+      font-weight: 500;
+      z-index: 100;
+    }
+
+    #connection-status.connected {
+      background-color: #07c160;
+    }
+
+    #connection-status.disconnected {
+      background-color: #fa5151;
+    }
+
+    #connection-status.connecting {
+      background-color: #ff9800;
+    }
+
+    #stats-bar {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      z-index: 100;
+    }
+
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: #888;
+      gap: 12px;
+    }
+
+    .empty-state-icon {
+      font-size: 64px;
+      opacity: 0.5;
+    }
+
+    .message-time-separator {
+      text-align: center;
+      color: #aaa;
+      font-size: 12px;
+      padding: 8px 0;
+    }
+
+    .emoji-icon {
+      font-size: 20px;
+    }
+
+    .voice-message {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .voice-icon {
+      font-size: 16px;
+    }
+
+    .voice-duration {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .quote-message {
+      border-left: 3px solid #07c160;
+      padding-left: 10px;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .transfer-message {
+      background: #fff7e6;
+      border: 1px solid #ffb74d;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .transfer-title {
+      font-size: 16px;
+      font-weight: bold;
+      color: #e65100;
+    }
+
+    .transfer-amount {
+      font-size: 24px;
+      font-weight: bold;
+      color: #e65100;
+      margin: 8px 0;
+    }
+
+    .transfer-memo {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .image-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.9);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .image-modal.active {
+      display: flex;
+    }
+
+    .image-modal img {
+      max-width: 90%;
+      max-height: 90%;
+      object-fit: contain;
+    }
+
+    .image-modal-close {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      font-size: 32px;
+      color: white;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="app-container">
+    <section id="chat-list-section">
+      <div id="search-bar">
+        <input type="text" id="search-input" placeholder="搜索聊天..." />
+      </div>
+      <div id="conversation-list">
+        <div class="empty-state" id="empty-list">
+          <div class="empty-state-icon">💬</div>
+          <div>暂无聊天记录</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="chat-window-section">
+      <div id="connection-status" class="disconnected">连接已断开</div>
+      
+      <header id="chat-header">
+        <div id="chat-header-left">
+          <div id="current-chat-avatar">W</div>
+          <div id="current-chat-name">全部消息</div>
+        </div>
+        <div id="chat-stats">收到 <span id="msg-count">0</span> 条新消息</div>
+      </header>
+      
+      <main id="messages-container">
+        <div class="empty-state" id="empty-messages">
+          <div class="empty-state-icon">📱</div>
+          <div>等待接收新消息...</div>
+          <div style="font-size: 12px;">有新消息时会自动显示在这里</div>
+        </div>
+      </main>
+
+      <footer id="input-area">
+        <textarea id="message-input" placeholder="输入消息（当前版本仅支持查看）..." disabled style="background: #f5f5f5;"></textarea>
+        <button id="send-button" disabled>发送</button>
+      </footer>
+    </section>
+
+    <div id="stats-bar">
+      延迟: <span id="latency">--</span>ms | 解密: <span id="decrypt-time">--</span>ms | 页数: <span id="pages">--</span>
+    </div>
+  </div>
+
+  <div class="image-modal" id="image-modal">
+    <span class="image-modal-close">&times;</span>
+    <img id="modal-image" src="" alt="预览" />
+  </div>
+
+  <script>
+    const messagesContainer = document.getElementById('messages-container');
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
+    const connectionStatus = document.getElementById('connection-status');
+    const conversationList = document.getElementById('conversation-list');
+    const emptyList = document.getElementById('empty-list');
+    const emptyMessages = document.getElementById('empty-messages');
+    const currentChatNameHeader = document.getElementById('current-chat-name');
+    const currentChatAvatarHeader = document.getElementById('current-chat-avatar');
+    const searchInput = document.getElementById('search-input');
+    const msgCountSpan = document.getElementById('msg-count');
+    const latencySpan = document.getElementById('latency');
+    const decryptTimeSpan = document.getElementById('decrypt-time');
+    const pagesSpan = document.getElementById('pages');
+    const imageModal = document.getElementById('image-modal');
+    const modalImage = document.getElementById('modal-image');
+
+    let eventSource = null;
+    let chatConversations = new Map();
+    let allMessages = [];
+    let msgCount = 0;
+
+    function getCurrentTimeString() {
+      const now = new Date();
+      return now.toTimeString().substring(0, 8);
+    }
+
+    function getDisplayTime(timestamp) {
+      if (!timestamp) return getCurrentTimeString();
+      const date = new Date(timestamp * 1000);
+      return date.toTimeString().substring(0, 8);
+    }
+
+    function formatTime(timestamp) {
+      if (!timestamp) return '';
+      const date = new Date(timestamp * 1000);
+      const today = new Date();
+      const isToday = date.toDateString() === today.toDateString();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const isYesterday = date.toDateString() === yesterday.toDateString();
+      
+      if (isToday) {
+        return date.toTimeString().substring(0, 5);
+      } else if (isYesterday) {
+        return '昨天 ' + date.toTimeString().substring(0, 5);
+      } else {
+        return (date.getMonth() + 1) + '/' + date.getDate() + ' ' + date.toTimeString().substring(0, 5);
+      }
+    }
+
+    function getInitials(name) {
+      if (!name) return '?';
+      if (name.length <= 2) return name;
+      return name.substring(0, 2);
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function createMessageElement(msg, isOwn = false) {
+      const wrapper = document.createElement('div');
+      wrapper.classList.add('message-wrapper');
+      wrapper.classList.add(isOwn ? 'sent' : 'received');
+      wrapper.dataset.timestamp = msg.timestamp || 0;
+      
+      const sender = msg.is_group && msg.sender ? `<div class="message-sender">${escapeHtml(msg.sender)}</div>` : '';
+      wrapper.innerHTML = sender;
+
+      const messageDiv = document.createElement('div');
+      messageDiv.classList.add('message');
+      
+      let content = msg.content || '';
+      
+      if (msg.image_url) {
+        content = `<img src="${msg.image_url}" class="message-image" onclick="showImageModal('${msg.image_url}')" alt="图片" />`;
+      } else if (msg.rich) {
+        if (msg.rich.type === 'emoji' && msg.rich.emoji_url) {
+          content = `<img src="${msg.rich.emoji_url}" class="message-image" alt="表情" />`;
+        } else if (msg.rich.type === 'link' || msg.rich.type === 'miniapp') {
+          content = `<div style="background:#f5f5f5;padding:10px;border-radius:6px;">
+            <div style="font-weight:bold;color:#333;margin-bottom:4px;">${escapeHtml(msg.rich.title)}</div>
+            ${msg.rich.des ? `<div style="font-size:13px;color:#666;margin-bottom:6px;">${escapeHtml(msg.rich.des).substring(0,100)}...</div>` : ''}
+            ${msg.rich.url ? `<a href="${escapeHtml(msg.rich.url)}" target="_blank" class="message-link">查看详情 →</a>` : ''}
+          </div>`;
+        } else if (msg.rich.type === 'file') {
+          content = `<div class="message-file">
+            <span class="file-icon">📎</span>
+            <div class="file-info">
+              <div class="file-name">${escapeHtml(msg.rich.title)}</div>
+              <div class="file-size">${formatFileSize(msg.rich.file_size || 0)}</div>
+            </div>
+          </div>`;
+        } else if (msg.rich.type === 'quote' && msg.rich.ref_content) {
+          content = `<div class="quote-message">${escapeHtml(msg.rich.ref_name)}: ${escapeHtml(msg.rich.ref_content)}</div>${escapeHtml(msg.content)}`;
+        } else if (msg.rich.type === 'transfer') {
+          content = `<div class="transfer-message">
+            <div class="transfer-title">${msg.rich.title || '微信转账'}</div>
+            <div class="transfer-amount">${msg.rich.fee_desc || msg.content}</div>
+            ${msg.rich.pay_memo ? `<div class="transfer-memo">备注: ${escapeHtml(msg.rich.pay_memo)}</div>` : ''}
+          </div>`;
+        } else if (msg.rich.type === 'video') {
+          content = `<div style="background:#f5f5f5;padding:10px;border-radius:6px;text-align:center;">🎬 视频消息 (${msg.rich.duration || 0}秒)</div>`;
+        } else {
+          content = escapeHtml(content);
+        }
+      } else if (msg.type === '表情') {
+        content = `<span class="emoji-icon">😀</span> ${escapeHtml(content)}`;
+      } else if (msg.type === '语音') {
+        const duration = msg.rich && msg.rich.duration ? msg.rich.duration + '秒' : '';
+        content = `<div class="voice-message"><span class="voice-icon">🎤</span><span>语音消息 ${duration}</span></div>`;
+      } else if (msg.type === '视频') {
+        content = `<div style="background:#f5f5f5;padding:10px;border-radius:6px;text-align:center;">🎬 ${escapeHtml(content)}</div>`;
+      } else {
+        content = escapeHtml(content);
+      }
+
+      messageDiv.innerHTML = `<div class="message-content">${content}</div>`;
+      
+      const metaDiv = document.createElement('div');
+      metaDiv.classList.add('message-meta');
+      metaDiv.innerHTML = `
+        <span class="message-type">${msg.type_icon || '💬'} ${escapeHtml(msg.type || '文本')}</span>
+        <span class="message-time">${formatTime(msg.timestamp)}</span>
+      `;
+      messageDiv.appendChild(metaDiv);
+      
+      wrapper.appendChild(messageDiv);
+      return wrapper;
+    }
+
+    function addMessageToDOM(msg, isOwn = false) {
+      if (emptyMessages) {
+        emptyMessages.style.display = 'none';
+      }
+
+      const msgElement = createMessageElement(msg, isOwn);
+      messagesContainer.appendChild(msgElement);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function updateConversationList(msg) {
+      const username = msg.username;
+      if (!username) return;
+
+      if (!chatConversations.has(username)) {
+        const item = document.createElement('div');
+        item.classList.add('conversation-item');
+        item.dataset.chatId = username;
+        item.innerHTML = `
+          <div class="avatar ${msg.is_group ? 'group' : ''}">${getInitials(msg.chat)}</div>
+          <div class="conversation-info">
+            <div class="conversation-name">
+              ${msg.is_group ? '<span class="group-icon">👥</span>' : ''}
+              ${escapeHtml(msg.chat || username)}
+            </div>
+            <div class="last-message">${escapeHtml(msg.content || msg.type || '新消息').substring(0, 50)}</div>
+          </div>
+          <div class="timestamp">${formatTime(msg.timestamp)}</div>
+        `;
+        
+        item.addEventListener('click', () => {
+          selectConversation(username);
+        });
+
+        conversationList.appendChild(item);
+        
+        if (emptyList) {
+          emptyList.style.display = 'none';
+        }
+      }
+
+      const conv = chatConversations.get(username);
+      if (conv) {
+        conv.lastMessage = msg.content || msg.type || '新消息';
+        conv.timestamp = msg.timestamp;
+        conv.unread = (conv.unread || 0) + 1;
+        
+        const item = conversationList.querySelector(`[data-chat-id="${username}"]`);
+        if (item) {
+          const lastMsgEl = item.querySelector('.last-message');
+          const timeEl = item.querySelector('.timestamp');
+          const avatarEl = item.querySelector('.avatar');
+          
+          if (lastMsgEl) lastMsgEl.textContent = (conv.lastMessage || '').substring(0, 50);
+          if (timeEl) timeEl.textContent = formatTime(conv.timestamp);
+          
+          let badge = item.querySelector('.unread-badge');
+          if (conv.unread > 0) {
+            if (!badge) {
+              badge = document.createElement('span');
+              badge.classList.add('unread-badge');
+              avatarEl.appendChild(badge);
+            }
+            badge.textContent = conv.unread > 99 ? '99+' : conv.unread;
+          } else if (badge) {
+            badge.remove();
+          }
+        }
+      }
+
+      sortConversationList();
+    }
+
+    function sortConversationList() {
+      const items = Array.from(conversationList.querySelectorAll('.conversation-item'));
+      items.sort((a, b) => {
+        const aUsername = a.dataset.chatId;
+        const bUsername = b.dataset.chatId;
+        const aConv = chatConversations.get(aUsername);
+        const bConv = chatConversations.get(bUsername);
+        return (bConv?.timestamp || 0) - (aConv?.timestamp || 0);
+      });
+      items.forEach(item => conversationList.appendChild(item));
+    }
+
+    function selectConversation(chatId) {
+      document.querySelectorAll('.conversation-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      
+      const item = conversationList.querySelector(`[data-chat-id="${chatId}"]`);
+      if (item) {
+        item.classList.add('active');
+      }
+
+      const conv = chatConversations.get(chatId);
+      if (conv) {
+        conv.unread = 0;
+        const avatarEl = item?.querySelector('.unread-badge');
+        if (avatarEl) avatarEl.remove();
+      }
+
+      currentChatNameHeader.textContent = conv?.chat || chatId || '全部消息';
+      currentChatAvatarHeader.textContent = getInitials(currentChatNameHeader.textContent);
+      currentChatAvatarHeader.className = conv?.is_group ? 'group' : '';
+
+      messagesContainer.innerHTML = '';
+      if (emptyMessages) {
+        emptyMessages.style.display = 'flex';
+      }
+
+      const filteredMsgs = allMessages.filter(m => m.username === chatId);
+      if (filteredMsgs.length === 0) {
+        const emptyState = document.createElement('div');
+        emptyState.className = 'empty-state';
+        emptyState.innerHTML = `
+          <div class="empty-state-icon">💬</div>
+          <div>与 ${escapeHtml(conv?.chat || chatId)} 的聊天记录</div>
+        `;
+        messagesContainer.appendChild(emptyState);
+      } else {
+        if (emptyMessages) emptyMessages.style.display = 'none';
+        filteredMsgs.forEach(msg => {
+          messagesContainer.appendChild(createMessageElement(msg));
+        });
+      }
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function showImageModal(url) {
+      modalImage.src = url;
+      imageModal.classList.add('active');
+    }
+
+    imageModal.addEventListener('click', (e) => {
+      if (e.target === imageModal || e.target.classList.contains('image-modal-close')) {
+        imageModal.classList.remove('active');
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && imageModal.classList.contains('active')) {
+        imageModal.classList.remove('active');
+      }
+    });
+
+    searchInput.addEventListener('input', (e) => {
+      const query = e.target.value.toLowerCase().trim();
+      document.querySelectorAll('.conversation-item').forEach(item => {
+        const name = item.querySelector('.conversation-name')?.textContent.toLowerCase() || '';
+        const lastMsg = item.querySelector('.last-message')?.textContent.toLowerCase() || '';
+        const visible = !query || name.includes(query) || lastMsg.includes(query);
+        item.style.display = visible ? 'flex' : 'none';
+      });
+    });
+
+    function connectToStream() {
+      if (eventSource) {
+        eventSource.close();
+      }
+
+      connectionStatus.textContent = '正在连接...';
+      connectionStatus.className = 'connecting';
+
+      try {
+        eventSource = new EventSource('http://localhost:5678/stream');
+
+        eventSource.onopen = function(event) {
+          console.log('SSE连接已建立');
+          connectionStatus.textContent = '已连接';
+          connectionStatus.className = 'connected';
+        };
+
+        eventSource.onmessage = function(event) {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('收到消息:', data);
+            
+            const now = Date.now() / 1000;
+            const latency = data.timestamp ? (now - data.timestamp).toFixed(1) : '--';
+            latencySpan.textContent = latency;
+            
+            if (data.decrypt_ms !== undefined) {
+              decryptTimeSpan.textContent = data.decrypt_ms;
+            }
+            if (data.pages !== undefined) {
+              pagesSpan.textContent = data.pages;
+            }
+
+            if (!chatConversations.has(data.username)) {
+              chatConversations.set(data.username, {
+                chat: data.chat,
+                is_group: data.is_group,
+                unread: 0
+              });
+            }
+
+            updateConversationList(data);
+            allMessages.push(data);
+            msgCount++;
+            msgCountSpan.textContent = msgCount;
+
+            const activeChat = document.querySelector('.conversation-item.active');
+            const activeChatId = activeChat?.dataset.chatId;
+            
+            if (!activeChatId || activeChatId === data.username) {
+              addMessageToDOM(data, false);
+            }
+
+          } catch (err) {
+            console.error('解析消息失败:', err);
+          }
+        };
+
+        eventSource.addEventListener('image_update', function(event) {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('图片更新:', data);
+            
+            allMessages.forEach((msg, index) => {
+              if (msg.username === data.username && msg.timestamp === data.timestamp) {
+                if (data.image_url) {
+                  msg.image_url = data.image_url;
+                }
+                if (data.v2_unsupported) {
+                  msg.content = msg.content || '[图片-新加密格式暂不支持]';
+                }
+              }
+            });
+
+            const messages = messagesContainer.querySelectorAll('.message-wrapper');
+            messages.forEach(wrapper => {
+              const timestamp = parseFloat(wrapper.dataset.timestamp);
+              if (timestamp === data.timestamp) {
+                const img = wrapper.querySelector('.message-image');
+                const content = wrapper.querySelector('.message-content');
+                if (img && data.image_url) {
+                  img.src = data.image_url;
+                }
+                if (content && data.v2_unsupported) {
+                  content.textContent = '[图片-新加密格式暂不支持预览]';
+                }
+              }
+            });
+
+          } catch (err) {
+            console.error('处理图片更新失败:', err);
+          }
+        });
+
+        eventSource.addEventListener('rich_update', function(event) {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('富媒体更新:', data);
+            
+            allMessages.forEach(msg => {
+              if (msg.username === data.username && msg.timestamp === data.timestamp) {
+                msg.rich = data.rich;
+              }
+            });
+
+          } catch (err) {
+            console.error('处理富媒体更新失败:', err);
+          }
+        });
+
+        eventSource.onerror = function(event) {
+          console.error('SSE连接错误');
+          connectionStatus.textContent = '连接失败';
+          connectionStatus.className = 'disconnected';
+          
+          setTimeout(() => {
+            connectToStream();
+          }, 3000);
+        };
+
+      } catch (error) {
+        console.error('创建SSE连接失败:', error);
+        connectionStatus.textContent = '连接失败';
+        connectionStatus.className = 'disconnected';
+      }
+    }
+
+    sendButton.addEventListener('click', () => {
+      const messageText = messageInput.value.trim();
+      if (messageText) {
+        const msg = {
+          content: messageText,
+          timestamp: Date.now() / 1000,
+          type: '文本',
+          type_icon: '💬',
+          chat: '我',
+          sender: ''
+        };
+        addMessageToDOM(msg, true);
+        messageInput.value = '';
+        console.log('发送消息(模拟):', messageText);
+      }
+    });
+
+    messageInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendButton.click();
+      }
+    });
+
+    window.onload = function() {
+      connectToStream();
+    };
+
+    window.addEventListener('beforeunload', function(e) {
+      if (eventSource) {
+        eventSource.close();
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.conversation-item')) return;
+    });
+  </script>
+</body>
+</html>

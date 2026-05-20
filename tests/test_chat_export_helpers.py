@@ -14,8 +14,8 @@ XML 解析器在前缀文本上崩溃。
 import unittest
 from unittest.mock import patch
 
-import chat_export_helpers
-import mcp_server
+from wechat_decrypt.export import helpers as chat_export_helpers
+from wechat_decrypt.services import mcp as mcp_server
 
 
 def _refer_appmsg(refer_content="hello world"):

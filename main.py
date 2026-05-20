@@ -6,26 +6,25 @@ python main.py decrypt       # 提取密钥 + 解密全部数据库
 python main.py export        # 提取密钥 + 解密 + 批量导出聊天记录
 python main.py all           # 从零到完成：密钥 → 解密 → 导出
 python main.py status        # 显示当前数据状态
+
+或使用:
+python -m wechat_decrypt     # 等价于 python main.py
 """
 
 import functools
 import glob
 import json
 import os
-import platform
-import subprocess
 import sys
 
 print = functools.partial(print, flush=True)
 
-from key_utils import strip_key_metadata
+from wechat_decrypt.key_utils import strip_key_metadata
 
 
 def check_wechat_running():
     """检查微信是否在运行，返回 True/False"""
-    if platform.system().lower() == "darwin":
-        return subprocess.run(["pgrep", "-x", "WeChat"], capture_output=True).returncode == 0
-    from find_all_keys import get_pids
+    from wechat_decrypt.keys.find_all import get_pids
     try:
         get_pids()
         return True
@@ -40,7 +39,7 @@ def _run_decode_images(cfg, argv):
     (只读已存在的 .dat 文件;V2 文件用 config.json 里的 image_aes_key)。
     """
     import argparse
-    from decode_image import decode_all_dats
+    from wechat_decrypt.decrypt.image import decode_all_dats
 
     parser = argparse.ArgumentParser(
         prog="main.py decode-images",
@@ -145,7 +144,7 @@ def ensure_keys(keys_file, db_dir):
 
     print("[*] 密钥文件不存在，正在从微信进程提取...")
     print()
-    from find_all_keys import main as extract_keys
+    from wechat_decrypt.keys.find_all import main as extract_keys
     try:
         extract_keys()
     except RuntimeError as e:
@@ -171,9 +170,7 @@ def ensure_keys(keys_file, db_dir):
 def show_status():
     """显示当前数据状态"""
     cfg = {}
-    # 走 config._config_file_path() 而不是硬编码 "config.json"
-    # 这样打包成 exe 后 (cwd 可能任意位置) 仍能找到正确的 config
-    from config import _config_file_path
+    from wechat_decrypt.config import _config_file_path
     config_file = _config_file_path()
     if os.path.exists(config_file):
         with open(config_file, encoding="utf-8") as f:
@@ -194,7 +191,6 @@ def show_status():
         dbs = glob.glob(os.path.join(decrypted_dir, "**/*.db"), recursive=True)
         total_mb = sum(os.path.getsize(f) for f in dbs) / 1024 / 1024
         print(f"[decrypt] {len(dbs)} 个数据库 ({total_mb:.0f} MB)")
-        # 检查是否有消息内容（约略估计是否已导出）
         for db in dbs:
             if "message" in os.path.basename(db):
                 sz = os.path.getsize(db) / 1024 / 1024
@@ -239,7 +235,6 @@ def show_status():
             pct = total_tx * 100 // max(total_voice, 1)
             print(f"[transcribe] {total_tx}/{total_voice} ({pct}%) 条语音已转录")
 
-    # 建议的下一步
     print()
     steps = []
     if not os.path.exists(decrypted_dir):
@@ -265,16 +260,6 @@ def print_usage():
     print("  python main.py status         显示当前状态和磁盘用量")
 
 
-def _call_with_argv(func, argv):
-    """调用子命令 main() 时临时隔离 sys.argv，避免 argparse 读到外层命令。"""
-    old_argv = sys.argv[:]
-    try:
-        sys.argv = argv
-        return func()
-    finally:
-        sys.argv = old_argv
-
-
 def main():
     print("=" * 60)
     print("  WeChat Decrypt")
@@ -283,7 +268,6 @@ def main():
 
     cmd = sys.argv[1] if len(sys.argv) > 1 else "web"
 
-    # help / status 不需要密钥和微信进程
     if cmd in ("help", "-h", "--help"):
         print_usage()
         return
@@ -291,18 +275,15 @@ def main():
         show_status()
         return
 
-    # 以下命令需要配置 + 微信进程
-    from config import load_config
+    from wechat_decrypt.config import load_config
     cfg = load_config()
 
-    # 早路由:decode-images 不需要微信进程在运行,也不需要 DB 密钥
     if len(sys.argv) > 1 and sys.argv[1] == "decode-images":
         print("[*] 批量解密图片...")
         print()
         _run_decode_images(cfg, sys.argv[2:])
         return
 
-    # 2. 检查微信进程
     if not check_wechat_running():
         print(f"[!] 未检测到微信进程 ({cfg.get('wechat_process', 'WeChat')})")
         print("    请先启动微信并登录，然后重新运行")
@@ -314,18 +295,18 @@ def main():
     if cmd == "decrypt":
         print("[*] 开始解密全部数据库...")
         print()
-        from decrypt_db import main as decrypt_all
+        from wechat_decrypt.decrypt.database import main as decrypt_all
         decrypt_all(sys.argv[2:])
 
     elif cmd in ("export", "all"):
         print("[*] 开始解密全部数据库...")
         print()
-        from decrypt_db import main as decrypt_all
+        from wechat_decrypt.decrypt.database import main as decrypt_all
         decrypt_all([])
         print()
         print("[*] 开始批量导出聊天记录...")
         print()
-        from export_all_chats import main as export_all
+        from wechat_decrypt.export.all_chats import main as export_all
         try:
             export_args = sys.argv[2:] if cmd == "export" else []
             export_all(export_args)
@@ -335,9 +316,9 @@ def main():
         if cmd == "all" and os.path.exists("exported_chats"):
             print()
             print("[*] 检查语音转录配置...")
-            from config import load_config
+            from wechat_decrypt.config import load_config
             cfg2 = load_config()
-            from mcp_server import _resolve_active_backend
+            from wechat_decrypt.services.mcp import _resolve_active_backend
             backend = _resolve_active_backend()
             if backend and backend != "local":
                 print(f"    检测到 backend = {backend}")
@@ -347,9 +328,16 @@ def main():
                 print("    配置后运行: python export_all_chats.py --with-transcriptions")
 
     elif cmd == "web":
+        decrypted_dir = cfg.get("decrypted_dir", "decrypted")
+        if not os.path.exists(decrypted_dir) or not glob.glob(os.path.join(decrypted_dir, "**/*.db"), recursive=True):
+            print("[*] 检测到数据库未解密，正在自动解密...")
+            print()
+            from wechat_decrypt.decrypt.database import main as decrypt_all
+            decrypt_all([])
+            print()
         print("[*] 启动 Web UI...")
         print()
-        from monitor_web import main as start_web
+        from wechat_decrypt.monitor.web import main as start_web
         start_web()
 
     else:

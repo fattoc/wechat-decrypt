@@ -1,11 +1,7 @@
 """测试 get_chat_images 新增的 offset / start_time / end_time 参数。"""
-import os
-import sys
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 def _img(local_id, create_time, md5=None, size=None):

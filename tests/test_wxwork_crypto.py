@@ -2,7 +2,7 @@ import os
 
 from Crypto.Cipher import AES
 
-from wxwork_crypto import (
+from wechat_decrypt.export.wxwork_crypto import (
     PAGE_SZ,
     SQLITE_HDR,
     decrypt_wxsqlite3_aes128_page,

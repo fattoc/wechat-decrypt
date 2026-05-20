@@ -10,7 +10,7 @@ without any source-only XML fields.
 """
 import unittest
 
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 # Realistic-shape sample with the noisy / sensitive attrs that used to leak.

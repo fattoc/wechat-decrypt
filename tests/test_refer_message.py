@@ -12,7 +12,7 @@ svrid 1 + 0*18，无真实 PII。
 import unittest
 import xml.etree.ElementTree as ET
 
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 # ---------- 合成 fixture ----------

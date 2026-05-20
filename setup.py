@@ -5,89 +5,45 @@ WeChat Decrypt — 交互式配置向导
 检测微信数据目录、选择转录 backend、生成 config.json。
 
 用法:
-    python3 setup.py           # 交互式配置
-    python3 setup.py --check   # 仅检查环境，不修改文件
+    python setup.py           # 交互式配置
+    python setup.py --check   # 仅检查环境，不修改文件
 """
 
 import argparse
 import glob
 import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
 
 
 def detect_wechat_dir():
-    """自动检测微信数据目录"""
-    system = platform.system().lower()
-
-    if system == "darwin":
-        containers = (
-            os.path.expanduser(
-                "~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files"
-            )
-        )
-        if os.path.exists(containers):
+    localappdata = os.environ.get("LOCALAPPDATA", "")
+    candidates = [
+        os.path.join(localappdata, "xwechat_files"),
+        os.path.join(os.environ.get("USERPROFILE", ""), "Documents", "xwechat_files"),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
             dirs = [
-                os.path.join(containers, d, "db_storage")
-                for d in os.listdir(containers)
-                if os.path.isdir(os.path.join(containers, d))
+                os.path.join(c, d, "db_storage")
+                for d in os.listdir(c)
+                if os.path.isdir(os.path.join(c, d))
             ]
             dirs = [d for d in dirs if os.path.exists(d)]
-            # 按修改时间排序，最近活跃的排最前
-            dirs.sort(key=lambda d: os.path.getmtime(d), reverse=True)
-            return dirs if dirs else None
-
-    elif system == "linux":
-        home = os.path.expanduser("~")
-        candidates = [
-            os.path.join(home, "Documents", "xwechat_files"),
-            os.path.join(home, ".xwechat", "files"),
-        ]
-        for c in candidates:
-            if os.path.exists(c):
-                dirs = [
-                    os.path.join(c, d, "db_storage")
-                    for d in os.listdir(c)
-                    if os.path.isdir(os.path.join(c, d))
-                ]
-                dirs = [d for d in dirs if os.path.exists(d)]
-                if dirs:
-                    return dirs
-
-    elif system == "windows":
-        localappdata = os.environ.get("LOCALAPPDATA", "")
-        candidates = [
-            os.path.join(localappdata, "xwechat_files"),
-            os.path.join(os.environ.get("USERPROFILE", ""), "Documents", "xwechat_files"),
-        ]
-        for c in candidates:
-            if os.path.exists(c):
-                dirs = [
-                    os.path.join(c, d, "db_storage")
-                    for d in os.listdir(c)
-                    if os.path.isdir(os.path.join(c, d))
-                ]
-                dirs = [d for d in dirs if os.path.exists(d)]
-                if dirs:
-                    return dirs
-
+            if dirs:
+                return dirs
     return None
 
 
 def detect_transcription_backends():
-    """检测可用的转录 backend"""
-    backends = {"local": True}  # local 总是可用（如果安装了依赖）
+    backends = {"local": True}
 
-    # whisper-cpp
     if shutil.which("whisper-cpp") or shutil.which("whisper-cli"):
         backends["whisper_cpp"] = True
         model_dirs = [
-            os.path.expanduser("~/Library/Application Support/whisper-cpp"),
             os.path.expanduser("~/whisper-models"),
-            "/opt/homebrew/share/whisper-cpp/models",
         ]
         for md in model_dirs:
             if os.path.exists(md):
@@ -98,7 +54,6 @@ def detect_transcription_backends():
     else:
         backends["whisper_cpp"] = False
 
-    # openai
     try:
         import openai  # noqa
         backends["openai"] = True
@@ -109,22 +64,18 @@ def detect_transcription_backends():
 
 
 def check_environment():
-    """检查环境，返回状态信息"""
     print("=== 环境检查 ===")
     py_ver = sys.version.split()[0]
     print(f"[Python] {py_ver}")
 
-    # venv
     in_venv = sys.prefix != sys.base_prefix
     print(f"[venv]  {'是' if in_venv else '否'}")
     if not in_venv:
-        print("       建议使用: python3 -m venv .venv && source .venv/bin/activate")
+        print("       建议使用: python -m venv .venv && .venv\\Scripts\\activate")
 
-    # whisper-cpp
     whisper_bin = shutil.which("whisper-cpp") or shutil.which("whisper-cli")
-    print(f"[whisper-cpp] {'✓ ' + whisper_bin if whisper_bin else '✗ 未安装 (brew install whisper-cpp)'}")
+    print(f"[whisper-cpp] {'✓ ' + whisper_bin if whisper_bin else '✗ 未安装'}")
 
-    # config
     if os.path.exists("config.json"):
         with open("config.json") as f:
             cfg = json.load(f)
@@ -134,12 +85,10 @@ def check_environment():
     else:
         print("[config.json] ✗ 未找到")
 
-    # 微信目录
     dirs = detect_wechat_dir()
     if dirs:
         print(f"[微信目录] 找到 {len(dirs)} 个:")
         for d in dirs:
-            age_days = (os.path.getmtime(__file__ if '__file__' in dir() else 0) - os.path.getmtime(d)) / 86400 if os.path.exists(d) else 0
             print(f"            {d}")
     else:
         print("[微信目录] 未找到自动检测路径")
@@ -148,10 +97,8 @@ def check_environment():
 
 
 def interactive_setup():
-    """交互式配置向导"""
     print("\n=== 微信解密工具 — 配置向导 ===\n")
 
-    # 加载或创建配置
     config = {}
     if os.path.exists("config.json"):
         with open("config.json") as f:
@@ -159,7 +106,6 @@ def interactive_setup():
         print(f"现有 config.json 已加载 ({len(config)} 个字段)")
         print()
 
-    # 微信数据目录
     detected = detect_wechat_dir()
     if detected:
         if len(detected) == 1:
@@ -182,11 +128,10 @@ def interactive_setup():
         chosen = input(f"      请手动输入路径 [{default_path}]: ") or default_path
         config["db_dir"] = chosen
 
-    # 转录 backend
     backends = detect_transcription_backends()
     print(f"\n[2/3] 语音转录 backend:")
     print(f"      [1] local — 本地 CPU 转录（默认，隐私最佳，速度较慢）")
-    status_w = "✓" if backends.get("whisper_cpp") else "✗ (brew install whisper-cpp)"
+    status_w = "✓" if backends.get("whisper_cpp") else "✗"
     print(f"      [2] whisper_cpp — GPU 加速 ({status_w})")
     status_o = "✓" if backends.get("openai") else "✗ (pip install openai)"
     print(f"      [3] openai — API 转录 ({status_o})")
@@ -207,7 +152,6 @@ def interactive_setup():
     except (ValueError, IndexError):
         config["transcription_backend"] = "local"
 
-    # 确认
     print(f"\n[3/3] 即将写入 config.json:")
     print(json.dumps(config, indent=4))
     ans = input("\n      确认？(Y/n): ").strip().lower()

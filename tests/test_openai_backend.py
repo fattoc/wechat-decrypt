@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 class _CacheIsolationMixin:

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 class _FakeCache:

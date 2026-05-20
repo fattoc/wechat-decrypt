@@ -1,10 +1,5 @@
 """测试 _resolve_msg_types 和 _build_message_filters 的 type_filter 路径。"""
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 def test_resolve_none_returns_no_filter():

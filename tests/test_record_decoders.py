@@ -26,7 +26,7 @@ import os
 import tempfile
 import unittest
 
-import mcp_server
+from wechat_decrypt.services import mcp as mcp_server
 
 
 # -------- _safe_basename ----------------------------------------------------
