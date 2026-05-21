@@ -364,27 +364,6 @@
       transition: border-color 0.2s;
     }
 
-    #message-input:focus {
-      border-color: #07c160;
-    }
-
-    #send-button {
-      align-self: flex-end;
-      padding: 10px 24px;
-      background-color: #07c160;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 600;
-      transition: background-color 0.2s;
-    }
-
-    #send-button:hover {
-      background-color: #06a050;
-    }
-
     #connection-status {
       position: absolute;
       top: 10px;
@@ -553,7 +532,7 @@
         </div>
         <div id="chat-stats">收到 <span id="msg-count">0</span> 条新消息</div>
       </header>
-      
+
       <main id="messages-container">
         <div class="empty-state" id="empty-messages">
           <div class="empty-state-icon">📱</div>
@@ -561,11 +540,6 @@
           <div style="font-size: 12px;">有新消息时会自动显示在这里</div>
         </div>
       </main>
-
-      <footer id="input-area">
-        <textarea id="message-input" placeholder="输入消息（当前版本仅支持查看）..." disabled style="background: #f5f5f5;"></textarea>
-        <button id="send-button" disabled>发送</button>
-      </footer>
     </section>
 
     <div id="stats-bar">
@@ -579,9 +553,9 @@
   </div>
 
   <script>
+    console.log = console.error = function() {};
+
     const messagesContainer = document.getElementById('messages-container');
-    const messageInput = document.getElementById('message-input');
-    const sendButton = document.getElementById('send-button');
     const connectionStatus = document.getElementById('connection-status');
     const conversationList = document.getElementById('conversation-list');
     const emptyList = document.getElementById('empty-list');
@@ -935,32 +909,98 @@
       }
 
       messagesContainer.innerHTML = '';
-      if (emptyMessages) {
-        emptyMessages.style.display = 'flex';
-      }
 
-      let filteredMsgs;
+      const loadingState = document.createElement('div');
+      loadingState.className = 'empty-state';
+      loadingState.id = 'loading-state';
+      loadingState.innerHTML = `
+        <div class="empty-state-icon">⏳</div>
+        <div>正在加载历史消息...</div>
+      `;
+      messagesContainer.appendChild(loadingState);
+
       if (chatId === null) {
-        filteredMsgs = allMessages;
-      } else {
-        filteredMsgs = allMessages.filter(m => m.username === chatId);
+        document.getElementById('loading-state')?.remove();
+        const filteredMsgs = allMessages;
+
+        if (filteredMsgs.length === 0) {
+          messagesContainer.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-icon">💬</div>
+              <div>暂无消息</div>
+            </div>
+          `;
+        } else {
+          filteredMsgs.forEach(msg => {
+            messagesContainer.appendChild(createMessageElement(msg));
+          });
+        }
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        renderConversationList();
+        return;
       }
 
-      if (filteredMsgs.length === 0) {
-        const emptyState = document.createElement('div');
-        emptyState.className = 'empty-state';
-        emptyState.innerHTML = `
-          <div class="empty-state-icon">💬</div>
-          <div>${chatId === null ? '暂无消息' : '与 ' + escapeHtml(chatConversations.get(chatId)?.chat || chatId) + ' 的聊天记录'}</div>
-        `;
-        messagesContainer.appendChild(emptyState);
-      } else {
-        if (emptyMessages) emptyMessages.style.display = 'none';
-        filteredMsgs.forEach(msg => {
-          messagesContainer.appendChild(createMessageElement(msg));
+      fetch(`/api/messages?username=${encodeURIComponent(chatId)}&limit=100`)
+        .then(response => {
+          console.log('API响应状态:', response.status, response.statusText);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          return response.json();
+        })
+        .then(historicalMessages => {
+          console.log('收到历史消息数量:', historicalMessages.length);
+          document.getElementById('loading-state')?.remove();
+
+          const existingIds = new Set(allMessages.map(m => `${m.username}_${m.timestamp}_${m.content?.substring(0, 20)}`));
+
+          historicalMessages.forEach(msg => {
+            const key = `${msg.username}_${msg.timestamp}_${msg.content?.substring(0, 20) || ''}`;
+            if (!existingIds.has(key)) {
+              allMessages.push(msg);
+              existingIds.add(key);
+            }
+          });
+
+          allMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+          const filteredMsgs = allMessages.filter(m => m.username === chatId);
+
+          if (filteredMsgs.length === 0) {
+            messagesContainer.innerHTML = `
+              <div class="empty-state">
+                <div class="empty-state-icon">💬</div>
+                <div>与 ${escapeHtml(chatConversations.get(chatId)?.chat || chatId)} 的聊天记录</div>
+              </div>
+            `;
+          } else {
+            filteredMsgs.forEach(msg => {
+              messagesContainer.appendChild(createMessageElement(msg));
+            });
+          }
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        })
+        .catch(error => {
+          console.error('加载历史消息失败:', error);
+          console.error('错误详情:', error.message, error.stack);
+          document.getElementById('loading-state')?.remove();
+
+          const filteredMsgs = allMessages.filter(m => m.username === chatId);
+
+          if (filteredMsgs.length === 0) {
+            messagesContainer.innerHTML = `
+              <div class="empty-state">
+                <div class="empty-state-icon">❌</div>
+                <div>加载历史消息失败: ${error.message}</div>
+              </div>
+            `;
+          } else {
+            filteredMsgs.forEach(msg => {
+              messagesContainer.appendChild(createMessageElement(msg));
+            });
+          }
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
         });
-      }
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
       renderConversationList();
     }
@@ -1163,30 +1203,6 @@
         connectionStatus.className = 'disconnected';
       }
     }
-
-    sendButton.addEventListener('click', () => {
-      const messageText = messageInput.value.trim();
-      if (messageText) {
-        const msg = {
-          content: messageText,
-          timestamp: Date.now() / 1000,
-          type: '文本',
-          type_icon: '💬',
-          chat: '我',
-          sender: ''
-        };
-        addMessageToDOM(msg, true);
-        messageInput.value = '';
-        console.log('发送消息(模拟):', messageText);
-      }
-    });
-
-    messageInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendButton.click();
-      }
-    });
 
     window.onload = function() {
       loadConversations();

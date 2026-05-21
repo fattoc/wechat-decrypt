@@ -1340,6 +1340,57 @@ class SessionMonitor:
                     break
         return None
 
+    def _parse_recall_message(self, xml_content, stranger):
+        """解析撤回消息XML，提取撤回者信息"""
+        import xml.etree.ElementTree as ET
+
+        try:
+            if '<msg>' in xml_content:
+                root = ET.fromstring(xml_content)
+
+                revoker_elem = root.find('.//revokemsg')
+                if revoker_elem is not None:
+                    session_time = revoker_elem.get('sessionTime', '')
+                    new_msg_id = revoker_elem.get('newMsgId', '')
+
+                    revoker_name = revoker_elem.find('revokerusername')
+                    if revoker_name is not None and revoker_name.text:
+                        revoker_username = revoker_name.text
+                        revoker_display = self._get_contact_name(revoker_username) or revoker_username
+                        return f'"{revoker_display}" 撤回了一条消息'
+
+                    stranger_name = revoker_elem.find('talkgername')
+                    if stranger_name is not None and stranger_name.text:
+                        revoker_username = stranger_name.text
+                        revoker_display = self._get_contact_name(revoker_username) or revoker_username
+                        return f'"{revoker_display}" 撤回了一条消息'
+
+                general_revoker = root.find('.//username')
+                if general_revoker is not None and general_revoker.text:
+                    revoker_username = general_revoker.text
+                    revoker_display = self._get_contact_name(revoker_username) or revoker_username
+                    return f'"{revoker_display}" 撤回了一条消息'
+
+                if stranger:
+                    revoker_display = self._get_contact_name(stranger) or stranger
+                    return f'"{revoker_display}" 撤回了一条消息'
+
+                return '有人撤回了一条消息'
+
+        except ET.ParseError:
+            pass
+        except Exception as e:
+            print(f"  [recall] 解析撤回消息失败: {e}", flush=True)
+
+        return xml_content if xml_content else '[撤回消息]'
+
+    def _get_contact_name(self, username):
+        """从联系人缓存获取用户名对应的昵称"""
+        contact = _get_contact(username)
+        if contact:
+            return contact.get('NickName') or contact.get('nick_name') or username
+        return username
+
     def _parse_rich_content(self, username, timestamp, msg_type):
         """解析富媒体消息, 返回 dict 或 None"""
         import xml.etree.ElementTree as ET
@@ -1798,11 +1849,25 @@ class Handler(BaseHTTPRequestHandler):
             pass  # 浏览器关闭连接，正常
 
     def do_GET(self):
+        print(f"  [web] GET请求: {self.path}", flush=True)
         if self.path == '/api/conversations':
             import threading
             _convs_lock = threading.Lock()
             with _convs_lock:
                 conversations = []
+
+                contact_cache = {}
+                try:
+                    contact_conn = sqlite3.connect(f"file:{CONTACT_CACHE}?mode=ro", uri=True)
+                    contact_rows = contact_conn.execute("SELECT username, nick_name FROM Contact").fetchall()
+                    contact_conn.close()
+                    for c_username, c_nick_name in contact_rows:
+                        if c_username and c_nick_name:
+                            contact_cache[c_username] = c_nick_name
+                    print(f"  [api] 已加载 {len(contact_cache)} 个联系人昵称", flush=True)
+                except Exception as e:
+                    print(f"  [api] 加载联系人失败: {e}", flush=True)
+
                 try:
                     conn = sqlite3.connect(f"file:{DECRYPTED_SESSION}?mode=ro", uri=True)
                     rows = conn.execute("""
@@ -1831,8 +1896,12 @@ class Handler(BaseHTTPRequestHandler):
                         if summary and ':\n' in summary:
                             summary = summary.split(':\n', 1)[1]
 
-                        display = username
                         is_group = '@chatroom' in username
+
+                        if is_group:
+                            display = contact_cache.get(username, username)
+                        else:
+                            display = contact_cache.get(username, username)
 
                         conversations.append({
                             'username': username,
@@ -1852,6 +1921,156 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.end_headers()
             self.wfile.write(json.dumps(conversations, ensure_ascii=False).encode('utf-8'))
+
+        elif self.path.startswith('/api/messages'):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            username = params.get('username', [''])[0]
+            limit_val = 100
+            try:
+                limit_val = min(int(params.get('limit', ['100'])[0]), 500)
+            except (ValueError, TypeError):
+                pass
+
+            print(f"  [api] 获取消息请求: username={username} limit={limit_val}", flush=True)
+
+            if not username:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': 'username required'}).encode())
+                return
+
+            messages = []
+            try:
+                mapping = build_username_db_map()
+                db_keys = mapping.get(username, [])
+
+                print(f"  [api] 用户映射: username={username}, db_keys={db_keys}", flush=True)
+
+                contact_cache_msg = {}
+                try:
+                    contact_conn = sqlite3.connect(f"file:{CONTACT_CACHE}?mode=ro", uri=True)
+                    contact_rows = contact_conn.execute("SELECT username, nick_name FROM Contact").fetchall()
+                    contact_conn.close()
+                    for c_username, c_nick_name in contact_rows:
+                        if c_username and c_nick_name:
+                            contact_cache_msg[c_username] = c_nick_name
+                except Exception as e:
+                    print(f"  [api] 加载联系人失败: {e}", flush=True)
+
+                chat_display = contact_cache_msg.get(username, username)
+
+                if not db_keys:
+                    print(f"  [api] 用户没有消息数据库，返回空列表", flush=True)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(json.dumps([], ensure_ascii=False).encode('utf-8'))
+                    return
+
+                table_name = f"Msg_{hashlib.md5(username.encode()).hexdigest()}"
+
+                for db_key in db_keys:
+                    dec_dir = os.path.join(_cfg["decrypted_dir"], os.path.dirname(db_key))
+                    db_filename = os.path.basename(db_key)
+                    dec_path = os.path.join(dec_dir, db_filename)
+
+                    print(f"  [api] 尝试数据库: {dec_path}", flush=True)
+
+                    if not os.path.exists(dec_path):
+                        print(f"  [api] 数据库不存在: {dec_path}", flush=True)
+                        continue
+
+                    try:
+                        conn2 = sqlite3.connect(f"file:{dec_path}?mode=ro&immutable=1", uri=True)
+
+                        rows = conn2.execute(f"""
+                            SELECT local_id, create_time, message_content, msg_type, WCDB_CT_message_content, Stranger, talker
+                            FROM [{table_name}]
+                            WHERE talker = ?
+                            ORDER BY create_time DESC, local_id DESC
+                            LIMIT ?
+                        """, (username, limit_val)).fetchall()
+                        conn2.close()
+
+                        for local_id, create_time, msg_content, msg_type, ct, stranger, talker in rows:
+                            content = ''
+                            if msg_type == 10000:
+                                if msg_content:
+                                    if isinstance(msg_content, bytes):
+                                        if ct == 4:
+                                            try:
+                                                content = _zstd_dctx.decompress(msg_content).decode('utf-8', errors='replace')
+                                            except Exception:
+                                                try:
+                                                    content = msg_content.decode('utf-8', errors='replace')
+                                                except Exception:
+                                                    content = '[撤回消息]'
+                                        else:
+                                            try:
+                                                content = msg_content.decode('utf-8', errors='replace')
+                                            except Exception:
+                                                content = '[撤回消息]'
+                                    else:
+                                        content = str(msg_content)
+
+                                    content = self._parse_recall_message(content, stranger)
+                            elif msg_type in (1, 47, 49):
+                                if msg_content:
+                                    if isinstance(msg_content, bytes):
+                                        if ct == 4:
+                                            try:
+                                                content = _zstd_dctx.decompress(msg_content).decode('utf-8', errors='replace')
+                                            except Exception:
+                                                content = msg_content.decode('utf-8', errors='replace')
+                                        else:
+                                            content = msg_content.decode('utf-8', errors='replace')
+                                    else:
+                                        content = str(msg_content)
+
+                            if content and ':\n' in content:
+                                content = content.split(':\n', 1)[1]
+
+                            sender = stranger or talker
+                            is_group = '@chatroom' in username
+                            sender_display = sender
+
+                            msg_type_name = format_msg_type(msg_type)
+                            msg_icon = msg_type_icon(msg_type)
+
+                            messages.append({
+                                'local_id': local_id,
+                                'timestamp': create_time,
+                                'username': username,
+                                'chat': chat_display,
+                                'is_group': is_group,
+                                'sender': sender,
+                                'sender_name': sender_display,
+                                'type': msg_type_name,
+                                'type_icon': msg_icon,
+                                'content': content[:500] if content else '',
+                            })
+
+                        if messages:
+                            print(f"  [api] 从 {db_key} 获取到 {len(rows)} 条消息", flush=True)
+                            break
+
+                    except Exception as e:
+                        print(f"  [api] 读取 {db_key} 失败: {e}", flush=True)
+                        continue
+
+            except Exception as e:
+                print(f"  [api] 获取消息失败: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+
+            messages.reverse()
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps(messages, ensure_ascii=False).encode('utf-8'))
 
         elif self.path.startswith('/api/history'):
             parsed = urllib.parse.urlparse(self.path)
